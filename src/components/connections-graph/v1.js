@@ -1,3 +1,4 @@
+import { get_graph_connections_results } from '../../utils/get_graph_connections_results.js';
 import styles_css from './v1.css';
 import { get_item_display_name } from 'obsidian-smart-env/src/utils/get_item_display_name.js';
 import { cos_sim } from 'smart-utils/cos_sim.js';
@@ -5,8 +6,7 @@ import { register_item_drag } from 'obsidian-smart-env/src/utils/register_item_d
 import { register_item_hover_popover } from 'obsidian-smart-env/src/utils/register_item_hover_popover.js';
 import {
   build_prefixed_connection_key,
-  is_connection_hidden,
-  is_connection_pinned,
+  resolve_connection_feedback,
 } from '../../utils/connections_list_item_state.js';
 import {
   hash_to_unit,
@@ -27,63 +27,6 @@ import {
 } from './v1.util.js';
 
 /**
- * Builds a Set of prefixed keys for the provided results.
- * @param {Array<{item?: {collection_key?: string, key?: string}}>} results
- * @returns {Set<string>}
- */
-export function build_prefixed_key_set(results = []) {
-  const prefixed_keys = new Set();
-  for (const result of results) {
-    const prefixed = prefixed_key_for_item(result?.item);
-    if (prefixed) prefixed_keys.add(prefixed);
-  }
-  return prefixed_keys;
-}
-
-/**
- * Computes the prefixed key for a result item.
- * @param {{collection_key?: string, key?: string}} item
- * @returns {string|undefined}
- */
-export function prefixed_key_for_item(item) {
-  if (!item) return undefined;
-  return build_prefixed_connection_key(item.collection_key, item.key);
-}
-
-/**
- * Collects hidden connection entries so they can be rendered as nodes.
- * @param {object} options
- * @param {Record<string, {hidden?: number, pinned?: number}>} [options.connections_state]
- * @param {Set<string>} [options.existing_keys]
- * @param {(collection_key: string, item_key: string) => any} options.resolve_item
- * @returns {Array<{item: any, score: null, is_hidden: true, prefixed_key: string}>}
- */
-export function collect_hidden_entries({
-  connections_state = {},
-  existing_keys = new Set(),
-  resolve_item,
-} = {}) {
-  if (typeof resolve_item !== 'function') return [];
-  const hidden_entries = [];
-  for (const [prefixed_key, state] of Object.entries(connections_state)) {
-    if (!state?.hidden || state?.pinned) continue;
-    if (existing_keys.has(prefixed_key)) continue;
-    const parsed = parse_prefixed_key(prefixed_key);
-    if (!parsed) continue;
-    const item = resolve_item(parsed.collection_key, parsed.item_key);
-    if (!item) continue;
-    existing_keys.add(prefixed_key);
-    hidden_entries.push({
-      item,
-      score: null,
-      is_hidden: true,
-      prefixed_key,
-    });
-  }
-  return hidden_entries;
-}
-
-/**
  * Builds className for a graph node based on state flags.
  * @param {{is_center?: boolean, is_hidden?: boolean, is_pinned?: boolean}} flags
  * @returns {string}
@@ -96,24 +39,12 @@ export function build_node_classname({ is_center = false, is_hidden = false, is_
   return classes.join(' ').trim();
 }
 
-function parse_prefixed_key(prefixed_key) {
-  if (typeof prefixed_key !== 'string' || !prefixed_key.includes(':')) return null;
-  const [collection_key, ...rest] = prefixed_key.split(':');
-  if (!collection_key || !rest.length) return null;
-  return { collection_key, item_key: rest.join(':') };
-}
-
-
 /**
- * CDN settings for D3 used by the graph component.
- * D3_INTEGRITY_SHA256 is intentionally left empty by default so builds or
- * plugin code can inject the correct SHA for the chosen d3.min.js asset.
+ * D3 settings used by the graph component.
+ * The fixed CDN import is kept external by esbuild and preserved as a runtime ESM import.
  */
-const D3_CDN_URL = 'https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js';
 const D3_EXPECTED_MAJOR = '7.';
-const D3_INTEGRITY_SHA256 =
-  (typeof globalThis !== 'undefined' && globalThis.SC_D3_INTEGRITY_SHA256) ||
-  '';
+let d3_import_promise = null;
 
 /**
  * Validate a candidate d3 instance and log if it looks unexpected.
@@ -130,61 +61,35 @@ function validate_d3_instance(d3) {
 }
 
 /**
- * Lazy-loads D3 from CDN once with optional SRI validation.
+ * Lazy-loads D3 from the CDN ESM bundle once without creating a script element.
  * If a global d3 already exists it is reused.
  * @returns {Promise<typeof import('d3')>}
  */
 async function load_d3() {
-  const g = typeof globalThis !== 'undefined' ? globalThis : window;
+  const g = typeof activeWindow !== 'undefined'
+    ? activeWindow
+    : (typeof window !== 'undefined' ? window : {})
+  ;
 
   if (g.d3) {
     validate_d3_instance(g.d3);
     return g.d3;
   }
 
-  const existing =
-    typeof document !== 'undefined'
-      ? document.querySelector('script[data-sc-d3]')
-      : null;
-  if (existing && g.d3) {
-    validate_d3_instance(g.d3);
-    return g.d3;
+  if (!d3_import_promise) {
+    d3_import_promise = import('https://cdn.jsdelivr.net/npm/d3@7/+esm')
+      .then((d3) => {
+        validate_d3_instance(d3);
+        if (!g.d3) g.d3 = d3;
+        return d3;
+      })
+      .catch((err) => {
+        d3_import_promise = null;
+        throw err;
+      });
   }
 
-  const d3 = await new Promise((resolve, reject) => {
-    if (typeof document === 'undefined' || !document.head) {
-      reject(new Error('D3 loader: document.head not available'));
-      return;
-    }
-
-    const script = document.createElement('script');
-    script.src = D3_CDN_URL;
-    script.async = true;
-    script.setAttribute('data-sc-d3', 'true');
-
-    const integrity = String(D3_INTEGRITY_SHA256 || '').trim();
-    if (integrity) {
-      script.integrity = integrity;
-      script.crossOrigin = 'anonymous';
-    }
-
-    script.onload = () => {
-      if (!g.d3) {
-        reject(new Error('D3 loader: script loaded but window.d3 is missing'));
-        return;
-      }
-      resolve(g.d3);
-    };
-
-    script.onerror = () => {
-      reject(new Error('D3 loader: failed to load d3 from CDN'));
-    };
-
-    document.head.appendChild(script);
-  });
-
-  validate_d3_instance(d3);
-  return d3;
+  return d3_import_promise;
 }
 
 /**
@@ -228,29 +133,18 @@ export async function render(connections_list, params = {}) {
 /* -------------------------------------------------------------------------- */
 
 async function post_process(connections_list, container, params = {}) {
-  const {
-    results = await connections_list.get_results(params),
-  } = params;
-
   try {
+    const result_entries = await get_graph_connections_results(
+      connections_list, params, params.results,
+    );
     const d3 = await load_d3();
 
     const to_item = params.to_item || connections_list?.item;
     if (!to_item) throw new Error('connections_graph: could not resolve center item.');
 
     const env = to_item.env;
-    const connections_settings = params.connections_settings ?? env.connections_lists.settings;
-    const connection_state = to_item?.data?.connections || {};
     const event_key_domain = params.event_key_domain || 'connections';
     const drag_event_key = `${event_key_domain}:drag_result`;
-    const base_prefixed_keys = build_prefixed_key_set(results);
-    const hidden_entries = collect_hidden_entries({
-      connections_state: connection_state,
-      existing_keys: base_prefixed_keys,
-      resolve_item: (collection_key, item_key) => connections_list?.env?.[collection_key]?.get(item_key),
-    });
-    const result_entries = [...results, ...hidden_entries];
-
     const svg = container.querySelector('svg.sc-graph-svg');
     const viewport = svg.querySelector('g.sc-graph-viewport');
     const g_nodes = viewport.querySelector('g.nodes');
@@ -335,15 +229,22 @@ async function post_process(connections_list, container, params = {}) {
         const v = non_center_vecs[i];
         const cluster_vec = centers[cluster] || null;
         const node_to_cluster_sim = (v && cluster_vec) ? Math.max(0, Math.min(1, cos_sim(v, cluster_vec))) : 0;
+        const score = Number.isFinite(res?.score)
+          ? +res.score
+          : Number.isFinite(res?.og_score)
+            ? +res.og_score
+            : (center_vec && v ? cos_sim(center_vec, v) : null)
+        ;
 
-        const prefixed_key = prefixed_key_for_item(r_item);
-        const isPinned = prefixed_key ? is_connection_pinned(connection_state, prefixed_key) : false;
-        const isHidden = Boolean(res?.is_hidden) || (prefixed_key ? is_connection_hidden(connection_state, prefixed_key) : false);
+        const prefixed_key = build_prefixed_connection_key(r_item.collection_key, r_item.key);
+        const feedback = res.feedback || resolve_connection_feedback(to_item, r_item);
+        const isPinned = feedback.state === 'pinned';
+        const isHidden = feedback.state === 'hidden';
 
         return {
           id: r_item.key,
           item: r_item,
-          score: Number.isFinite(res?.score) ? +res.score : (center_vec && v ? cos_sim(center_vec, v) : null), // display only
+          score, // display only
           ring_r: rr,
           angle,
           radius: NODE_R,
@@ -546,9 +447,8 @@ async function post_process(connections_list, container, params = {}) {
           node_sel.select('text.sc-node-label')
             .each(function (d) {
               if (d.isCenter) return;
-              const node = this;
-              const label_width = typeof node.getComputedTextLength === 'function'
-                ? node.getComputedTextLength()
+              const label_width = typeof this.getComputedTextLength === 'function'
+                ? this.getComputedTextLength()
                 : 0;
               const { anchor, offset } = label_anchor_offset(d.x, {
                 center_x,
@@ -557,7 +457,7 @@ async function post_process(connections_list, container, params = {}) {
                 radius: d.radius,
                 margin: LABEL_MARGIN,
               });
-              d3.select(node)
+              d3.select(this)
                 .attr('text-anchor', anchor)
                 .attr('x', offset);
             });
@@ -581,7 +481,7 @@ async function post_process(connections_list, container, params = {}) {
 
   } catch (err) {
     console.error('[connections_graph] post_process error:', err);
-    const fallback = document.createElement('p');
+    const fallback = activeDocument.createElement('p');
     fallback.className = 'sc-no-results';
     fallback.textContent = 'Unable to render graph. See console for details.';
     container.appendChild(fallback);
@@ -612,7 +512,7 @@ function build_result_detail(node, center_item) {
   return {
     collection_key,
     item_key,
-    prefixed_key: node.prefixed_key || prefixed_key_for_item(node.item) || build_prefixed_connection_key(collection_key, item_key),
+    prefixed_key: node.prefixed_key || build_prefixed_connection_key(collection_key, item_key),
     score: typeof node.score === 'number' ? node.score : null,
     is_hidden: Boolean(node.isHidden),
     is_pinned: Boolean(node.isPinned),
@@ -620,3 +520,4 @@ function build_result_detail(node, center_item) {
     center_key: center_item?.key,
   };
 }
+

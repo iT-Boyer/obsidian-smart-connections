@@ -40,11 +40,11 @@ const is_last_line_visible = (editor_view) => {
 };
 
 const schedule_next_frame = (callback) => {
-  if (typeof requestAnimationFrame === 'function') {
-    requestAnimationFrame(callback);
+  if (typeof window.requestAnimationFrame === 'function') {
+    window.requestAnimationFrame(callback);
     return;
   }
-  setTimeout(callback, 0);
+  window.setTimeout(callback, 0);
 };
 
 export class ConnectionsFooterView {
@@ -92,8 +92,8 @@ export class ConnectionsFooterView {
     window.addEventListener('resize', on_resize);
 
     this._detach_visibility_guard = () => {
-      try { scroll_target.removeEventListener('scroll', on_scroll); } catch {}
-      try { window.removeEventListener('resize', on_resize); } catch {}
+      try { scroll_target.removeEventListener('scroll', on_scroll); } catch { /* Ignore cleanup failures. */ }
+      try { window.removeEventListener('resize', on_resize); } catch { /* Ignore cleanup failures. */ }
       this._detach_visibility_guard = null;
     };
   }
@@ -104,7 +104,7 @@ export class ConnectionsFooterView {
     }
   }
 
-  async render_view() {
+  async render_view(params = {}) {
     if (!this.env.connections_lists?.settings?.footer_connections) return this.remove();
     const editor_view = this.plugin.get_editor_view();
     if (!editor_view) return;
@@ -126,6 +126,11 @@ export class ConnectionsFooterView {
     if (!entity) {
       editor_view.dispatch({ effects: [set_connections_footer_dom_effect.of(null)] });
       return;
+    }
+
+    if (params.force && this.container_map[entity.key] instanceof HTMLElement) {
+      this.container_map[entity.key].remove();
+      delete this.container_map[entity.key];
     }
 
     if (this.container_map[entity.key]?.isConnected) {
@@ -175,14 +180,14 @@ export class ConnectionsFooterView {
   register_env_listeners() {
     let handle_current_source_debounce;
     this.register_env_listener('sources:opened', () => {
-      if (handle_current_source_debounce) clearTimeout(handle_current_source_debounce);
-      handle_current_source_debounce = setTimeout(() => {
+      if (handle_current_source_debounce) window.clearTimeout(handle_current_source_debounce);
+      handle_current_source_debounce = window.setTimeout(() => {
         this.render_view();
       }, 250);
     });
     this.register_env_listener('settings:changed', (event) => {
       if(event.path?.includes('connections_lists')) {
-        this.render_view();
+        this.render_view({ force: true });
       }
     });
   }

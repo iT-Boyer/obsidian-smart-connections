@@ -1,6 +1,5 @@
 import esbuild from 'esbuild';
 import path from 'path';
-import 'dotenv/config';
 import { build_plugin } from 'obsidian-smart-env/build/build_plugin.js';
 import { build_smart_env_config } from 'obsidian-smart-env/build/build_env_config.js';
 import { create_banner } from './src/utils/banner.js';
@@ -12,9 +11,6 @@ const roots = [
 build_plugin({
   esbuild,
   build_banner: create_banner,
-  define: {
-    'process.env.DEFAULT_OPEN_ROUTER_API_KEY': JSON.stringify(process.env.DEFAULT_OPEN_ROUTER_API_KEY),
-  },
   entry_point: 'src/main.js',
   entry_point_from_argv: true,
   env_config_builder: build_smart_env_config,
@@ -23,6 +19,7 @@ build_plugin({
   external: [
     '@codemirror/state',
     '@codemirror/view',
+    'https://cdn.jsdelivr.net/npm/d3@7/+esm',
     '@xenova/transformers',
     '@huggingface/transformers',
     'http',

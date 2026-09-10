@@ -1,3 +1,4 @@
+import { get_visible_connections_results } from './get_visible_connections_results.js';
 const DEFAULT_RESULTS_LIMIT = 20;
 
 /**
@@ -13,7 +14,17 @@ export async function get_random_connection(env, file_path, { rng = Math.random 
   const source = env.smart_sources.get(file_path);
   if (!source?.should_embed) return null;
 
-  const connections = await source.connections.get_results({ limit: DEFAULT_RESULTS_LIMIT });
+  const connections_list = source.connections || env.connections_lists?.new_item?.(source);
+  if (!connections_list?.get_results) return null;
+
+  let connections = [];
+  try {
+    connections = await get_visible_connections_results(connections_list, { limit: DEFAULT_RESULTS_LIMIT });
+  } catch (err) {
+    console.error('get_random_connection: failed to get connections', err);
+    return null;
+  }
+
   if (!Array.isArray(connections) || connections.length === 0) return null;
 
   return pick_weighted_connection(connections, { rng });

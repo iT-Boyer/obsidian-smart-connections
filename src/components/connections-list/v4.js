@@ -1,3 +1,4 @@
+import { get_visible_connections_results } from '../../utils/get_visible_connections_results.js';
 /**
  * @returns {Promise<string>} A promise that resolves to the .sc-list HTML string.
  */
@@ -26,21 +27,34 @@ export async function post_process(connections_list, container, opts = {}) {
   const graph_container = container.querySelector('.connections-graph-container');
   const list_container = container.querySelector('.connections-list.sc-list');
   container.dataset.key = connections_list.item.key;
-  const results = await connections_list.get_results(opts);
-  const connections_settings = opts.connections_settings // use opts.connections_settings for passing codeblock or footer-specific settings
-    ?? env.connections_lists.settings
-  ;
-  const component_settings = connections_settings.components?.connections_list_v4 || {};
-  const show_graph = opts.show_graph ?? component_settings.show_graph;
-  if(show_graph) {
-    try {
-      const graph = await env.smart_components.render_component('connections_graph_v1', connections_list, { ...opts, results });
-      this.empty(graph_container);
-      graph_container.appendChild(graph);
-      register_graph_events(graph, list_container);
-    } catch (_err) {
-      this.empty(graph_container);
-    }
+  opts.on_visible_results?.([]);
+  const connections_settings = opts.connections_settings ?? connections_list.settings ?? {};
+  const score_algo_key = opts.score_algo_key ?? connections_settings.score_algo_key;
+  const query_params = {
+    limit: opts.limit ?? connections_settings.results_limit,
+    results_collection_key: opts.results_collection_key ?? connections_settings.results_collection_key,
+    score_algo_key,
+    score_settings: opts.score_settings !== undefined
+      ? opts.score_settings
+      : connections_settings.actions?.[score_algo_key],
+    connections_post_process: opts.connections_post_process ?? connections_settings.connections_post_process,
+    filter: opts.filter,
+    exclude_inlinks: opts.exclude_inlinks ?? connections_settings.exclude_inlinks,
+    exclude_outlinks: opts.exclude_outlinks ?? connections_settings.exclude_outlinks,
+    exclude_frontmatter_blocks: opts.exclude_frontmatter_blocks ?? connections_settings.exclude_frontmatter_blocks,
+    rank_query: opts.rank_query,
+  };
+  const ranked_results = await connections_list.get_results(query_params);
+  const results = await get_visible_connections_results(connections_list, query_params, ranked_results);
+  try {
+    const graph = await env.smart_components.render_component('connections_graph_v1', connections_list, { ...query_params, connections_settings, results: ranked_results });
+    this.empty(graph_container);
+    graph_container.appendChild(graph);
+    register_graph_events(graph, list_container);
+  } catch (_err) {
+    this.empty(graph_container);
+    const error_message = this.create_doc_fragment(`<p class="sc-graph-error">Unable to load graph visualization: ${typeof _err?.message === 'string' ? _err.message : 'Unknown error'}</p>`);
+    graph_container.appendChild(error_message);
   }
 
   if (!results || !Array.isArray(results) || results.length === 0) {
@@ -51,9 +65,10 @@ export async function post_process(connections_list, container, opts = {}) {
 
   const smart_components = connections_list.env.smart_components;
   const result_frags = await Promise.all(results.map(result => {
-    return smart_components.render_component('connections_list_item_v3', result, { ...opts });
+    return smart_components.render_component('connections_list_item_v3', result, { ...opts, visible_results: results });
   }));
   result_frags.forEach(result_frag => list_container.appendChild(result_frag));
+  opts.on_visible_results?.(results);
   return container;
 }
 
@@ -73,8 +88,7 @@ function focus_result_from_graph(list_container, detail = {}) {
   if (target.classList.contains('sc-collapsed')) target.classList.remove('sc-collapsed');
   target.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
   target.classList.add(GRAPH_FOCUS_CLASS);
-  const schedule = typeof window !== 'undefined' ? window.setTimeout : setTimeout;
-  schedule?.(() => target.classList.remove(GRAPH_FOCUS_CLASS), GRAPH_FOCUS_TIMEOUT_MS);
+  window.setTimeout?.(() => target.classList.remove(GRAPH_FOCUS_CLASS), GRAPH_FOCUS_TIMEOUT_MS);
 }
 
 function find_result_element(list_container, detail = {}) {
@@ -88,12 +102,4 @@ function find_result_element(list_container, detail = {}) {
 
 export const display_name = 'Version 4.0 (Graph + List)';
 
-export const settings_config = {
-  "show_graph": {
-    name: "Show graph",
-    type: "toggle",
-    description: "Show a graph visualization of the connections above the list.",
-    // default: true,
-    group: "Connections lists"
-  },
-};
+export const settings_config = {};

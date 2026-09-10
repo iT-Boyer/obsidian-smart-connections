@@ -1,11 +1,13 @@
 {
   "name": "smart-connections-obsidian",
-  "version": "4.5.0",
+  "version": "4.7.2",
   "type": "module",
   "description": "Link and chat with your notes using ChatGPT and embedding artificial intelligence from OpenAI.",
   "scripts": {
     "build": "node esbuild.js",
+    "build-dev": "node --env-file=.env esbuild.js",
     "release": "node release.js",
+    "prepare-release": "node --env-file=.env releases/run_format_release_notes.js",
     "test": "npx ava --verbose"
   },
   "repository": {
@@ -28,28 +30,25 @@
   },
   "homepage": "https://smartconnections.app",
   "devDependencies": {
-    "@xenova/transformers": "latest",
-    "archiver": "^6.0.1",
     "ava": "^6.0.1",
-    "axios": "^1.6.7",
-    "dotenv": "^16.3.1",
     "esbuild": "^0.25.9",
     "eslint": "^10.3.0",
+    "jsbrains": "github:brianpetro/jsbrains#ba80525b083cf515555cedbdc6294a2d0aa5da68",
     "swagger-jsdoc": "^6.2.8"
   },
   "dependencies": {
+    "@codemirror/state": "6.5.0",
+    "@codemirror/view": "6.38.6",
     "js-tiktoken": "^1.0.19",
     "obsidian": "latest",
     "obsidian-smart-env": "file:../obsidian-smart-env",
     "smart-blocks": "file:../jsbrains/smart-blocks",
     "smart-chat-model": "file:../jsbrains/smart-chat-model",
     "smart-collections": "file:../jsbrains/smart-collections",
-    "smart-context-obsidian": "file:../smart-context-obsidian",
     "smart-embed-model": "file:../jsbrains/smart-embed-model",
     "smart-entities": "file:../jsbrains/smart-entities",
     "smart-file-system": "file:../jsbrains/smart-fs",
     "smart-http-request": "file:../jsbrains/smart-http-request",
-    "smart-lookup-obsidian": "file:../smart-lookup-obsidian",
     "smart-model": "file:../jsbrains/smart-model",
     "smart-notices": "file:../jsbrains/smart-notices",
     "smart-settings": "file:../jsbrains/smart-settings",
@@ -61,14 +60,12 @@
     "files": [
       "*.test.js",
       "smart-chat/*.test.js",
-      "src/*.test.js",
-      "src/utils/*.test.js"
+      "src/**/*.test.js",
+      "migrations/**/*.test.js"
     ],
     "require": []
   },
   "workspaces": [
-    "../jsbrains/*",
-    "../smart-context-obsidian",
-    "../smart-lookup-obsidian"
+    "../jsbrains/*"
   ]
 }

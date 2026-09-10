@@ -2,28 +2,26 @@
 import styles from './connections_footer_view.css';
 
 const FOOTER_FOLDED_STORAGE_KEY = 'sc_footer_connections_folded';
+const FOOTER_LIST_COLLAPSED_CLASS = 'sc-footer-list-collapsed';
 
-function get_footer_connections_folded() {
-  if (typeof localStorage === 'undefined') return false;
-  return localStorage.getItem(FOOTER_FOLDED_STORAGE_KEY) === 'true';
+function get_footer_connections_folded(app) {
+  return app.loadLocalStorage(FOOTER_FOLDED_STORAGE_KEY) === 'true';
 }
 
-function set_footer_connections_folded(folded) {
-  if (typeof localStorage === 'undefined') return;
-  localStorage.setItem(FOOTER_FOLDED_STORAGE_KEY, String(folded));
+function set_footer_connections_folded(app, folded) {
+  app.saveLocalStorage(FOOTER_FOLDED_STORAGE_KEY, String(folded));
 }
 
 function apply_footer_fold_state(header_container, list_container, folded) {
   if (!header_container || !list_container) return;
+  list_container.classList.toggle(FOOTER_LIST_COLLAPSED_CLASS, Boolean(folded));
   if (folded) {
     header_container.setAttribute('aria-label', 'Click to expand');
     header_container.classList.add('is-collapsed');
-    list_container.style.display = 'none';
     return;
   }
   header_container.setAttribute('aria-label', 'Click to collapse');
   header_container.classList.remove('is-collapsed');
-  list_container.style.display = 'block';
 }
 
 /**
@@ -36,8 +34,11 @@ export async function build_html(view, opts = {}) {
   // Previous footer wrapper kept the legacy "connections-view-early" class:
   // <div class="connections-view connections-footer-view sc-connections-view connections-view-early">
   const html = `<div class="embedded-backlinks">
-    <div class="backlink-pane" style="position: relative;">
+    <div class="backlink-pane sc-footer-backlink-pane">
       <div class="tree-item-self is-clickable" aria-label="Click to collapse">
+        <div class="sc-footer-connections-icon" aria-hidden="true">
+          ${this.get_icon_html('smart-connections')}
+        </div>
         <div class="tree-item-inner">Smart Connections</div>
       </div>
       <div class="search-result-container">
@@ -87,21 +88,33 @@ export async function post_process(view, container, opts = {}) {
   header_container?.addEventListener('click', (event) => {
     event.preventDefault();
     event.stopPropagation();
-    const next_folded = !get_footer_connections_folded();
-    set_footer_connections_folded(next_folded);
+    const next_folded = !get_footer_connections_folded(view.app);
+    set_footer_connections_folded(view.app, next_folded);
     apply_footer_fold_state(header_container, list_container, next_folded);
   });
 
-  apply_footer_fold_state(header_container, list_container, get_footer_connections_folded());
+  apply_footer_fold_state(header_container, list_container, get_footer_connections_folded(view.app));
 
   if (!connections_item) {
     return container;
   }
 
   const connections_list = connections_item.connections || env.connections_lists.new_item(connections_item);
-  const list = await env.smart_components.render_component('connections_list_v4', connections_list, { ...opts });
+  const connections_list_component_key = opts.connections_list_component_key
+    || env.connections_lists.settings.footer_connections_list_component_key
+    || 'connections_list_v3'
+  ;
+  const list = await env.smart_components.render_component(
+    connections_list_component_key,
+    connections_list,
+    {
+      ...opts,
+      render_connections: view.render_view.bind(view),
+    },
+  );
 
   this.empty(list_container);
   list_container.appendChild(list);
   return container;
 }
+

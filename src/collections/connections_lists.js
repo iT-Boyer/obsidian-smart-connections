@@ -28,7 +28,7 @@ export class ConnectionsLists extends Collection {
   process_load_queue() {} // no persisting data (for now)
 
   constructor(env, opts = {}) {
-    migrate_connections_lists_settings(env);
+    migrate_connections_lists_settings(env); // probably should be removed soon
     super(env, opts);
   }
 
@@ -41,13 +41,12 @@ export class ConnectionsLists extends Collection {
       connections_view_location: 'right',
       exclude_frontmatter_blocks: true,
       connections_list_component_key: 'connections_list_v4',
+      footer_connections_list_component_key: 'connections_list_v3',
       connections_list_item_component_key: 'connections_list_item_v3',
       frontmatter_filter_include: '',
       frontmatter_filter_exclude: '',
       components: {
-        connections_list_v4: {
-          show_graph: true,
-        },
+        connections_list_v4: {},
         connections_list_item_v3: {
           render_markdown: true,
           show_full_path: false,
@@ -60,17 +59,28 @@ export class ConnectionsLists extends Collection {
     return settings_config(this);
   }
 
-  new_item(item) {
-    const connections_list = new this.item_type(this.env, {
+  new_connections_list(item) {
+    return new this.item_type(this.env, {
       collection_key: item.collection_key,
       item_key: item.key
     });
+  }
+
+  new_item(item) {
+    const connections_list = this.new_connections_list(item);
     this.set(connections_list);
     Object.defineProperty(item, 'connections', {
       get: () => connections_list,
       configurable: true
     });
     return connections_list;
+  }
+
+  get_connections_list_component_options() {
+    return Object.entries(this.env.config.components || {})
+      .filter(([key]) => key.startsWith('connections_list_') && !key.startsWith('connections_list_item_'))
+      .map(([value, component]) => ({ value, name: component.display_name || value, description: component.display_description }))
+    ;
   }
 
   get_connections_list_item_options() {
@@ -100,15 +110,6 @@ export class ConnectionsLists extends Collection {
   }
 
   get connections_list_component_settings_config() {
-    // TEMP 2026-02-23 (migrating towards dynamic component settings)
-    if(!this.settings?.connections_list_component_key || (!this.env.is_pro && ['none', 'connections_list_v4_2', 'connections_list_v3'].includes(this.settings.connections_list_component_key))) {
-      this.settings.connections_list_component_key = 'connections_list_v4';
-    }
-    if(!this.settings?.components?.connections_list_v4) {
-      if(!this.settings.components) this.settings.components = {};
-      this.settings.components.connections_list_v4 = { ...this.constructor.default_settings.components.connections_list_v4 };
-    }
-    // END TEMP
     const component_key = this.settings.connections_list_component_key;
     if(!component_key || component_key === 'none') return null;
     const component_module = this.env.config.components?.[component_key];
@@ -164,6 +165,15 @@ export function settings_config(scope) {
         ];
       }
     },
+    "connections_list_component_key": {
+      group: 'Display',
+      name: "Connections List Component",
+      type: "dropdown",
+      description: "Select the component used to render the connections list.",
+      options_callback: (scope) => {
+        return scope.get_connections_list_component_options();
+      },
+    },
     "inline_connections": {
       group: 'Inline connections',
       name: "Show inline connections",
@@ -176,6 +186,13 @@ export function settings_config(scope) {
       name: "Show footer connections",
       type: "toggle",
       description: "Show connections at the bottom of each note.",
+    },
+    "footer_connections_list_component_key": {
+      group: 'Footer connections',
+      name: "Footer connections list component",
+      type: "dropdown",
+      description: "Select the component used to render the connections list in note footers.",
+      options_callback: (scope) => scope.get_connections_list_component_options(),
     },
     filters_helper: {
       group: 'Connections filters',
